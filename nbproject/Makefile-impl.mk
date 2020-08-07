@@ -24,7 +24,7 @@ CLEAN_SUBPROJECTS=${CLEAN_SUBPROJECTS_${SUBPROJECTS}}
 
 
 # Project Name
-PROJECTNAME=testeavr.X
+PROJECTNAME=PWFloppo
 
 # Active Configuration
 DEFAULTCONF=default

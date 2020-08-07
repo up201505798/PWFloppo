@@ -23,16 +23,51 @@
 #include <util/delay.h>
 #include<avr/interrupt.h>
 
-void USART1_sendChar(char c);
-
+void USART1_sendString(const char* string);
+volatile uint8_t buffer_out[100];
+volatile uint8_t buffer_size=0;
 
 ISR(USART1_RXC_vect){
-    USART1_sendChar( USART1.RXDATAL + 1 ); 
+    switch(USART1.RXDATAL){
+        case '0': PORTA.OUTTGL = PIN0_bm; //drive
+                  (PORTA.OUT & PIN0_bm)? USART1_sendString("Drive Desligada"): USART1_sendString("Drive Ligada");
+                  break;
+        case '1': PORTA.OUTTGL = PIN1_bm; //MOTOR
+                  (PORTA.OUT & PIN0_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado")  ;
+      break;
+        default: break;
+        
+    } 
+}
+
+ISR(USART1_TXC_vect){
+   
+    static uint8_t position=0;
+    if(position<buffer_size){
+        while(!(USART1.STATUS & USART_DREIF_bm));
+   
+        USART1.TXDATAL = buffer_out[position];
+        position++;
+    }
+    else{
+        position=0;
+        buffer_size=0;
+    }
 }
 
 
-void USART1_init(void)
-{
+void IO_init(void){
+    
+    PORTA.DIRSET = PIN0_bm;//DRIVE
+    PORTA.OUTSET = PIN0_bm;//DRIVE OFF
+    
+    PORTA.DIRSET = PIN1_bm;//Motor
+    PORTA.OUTSET = PIN1_bm;//motor OFF
+    
+ 
+
+}
+void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
     PORTC.DIRCLR = PIN1_bm;                             /* set pin 1 of PORT C (RXd) as input*/
     
@@ -41,23 +76,23 @@ void USART1_init(void)
     USART1.CTRLC = USART_CHSIZE0_bm
                  | USART_CHSIZE1_bm;                    /* set the data format to 8-bit*/
                  
-    USART1.CTRLA = USART_RXCIE_bm;// | USART_TXCIE_bm;   
+    USART1.CTRLA = USART_RXCIE_bm | USART_TXCIE_bm;   
     USART1.CTRLB |= (USART_TXEN_bm |USART_RXEN_bm) ;                      /* enable transmitter*/
 }
 
-void USART1_sendChar(char c)
+void USART1_sendString(const char* string)
 {
-    while(!(USART1.STATUS & USART_DREIF_bm))
-    {
-        ;
-    }
+    int i=0;
+    while(buffer_size!=0);
+    for(i=0;string[i]!='\0';i++)
+        buffer_out[i]=string[i];
+    buffer_size=i;
+    while(!(USART1.STATUS & USART_DREIF_bm));
+    USART1.TXDATAL = '\n';
     
-    USART1.TXDATAL = c;
-    while(!(USART1.STATUS & USART_DREIF_bm)) 
-    {
-        ;
-    }
 }
+
+
 
 
 
@@ -69,16 +104,17 @@ int main (void)
 
 
 
-void USART1_init(void);
 
 
 
+    IO_init();
     USART1_init();
     sei();
     while (1) 
     {
          
-        _delay_ms(1000);
+
+        
     }
 }
     
