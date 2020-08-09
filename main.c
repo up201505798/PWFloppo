@@ -17,23 +17,43 @@
     OF FEES, IF ANY, THAT YOU HAVE PAID DIRECTLY TO MICROCHIP FOR THIS
     SOFTWARE.
 */
-#define F_CPU                           (4000000UL)         /* using default clock 4MHz*/
-#define USART1_BAUD_RATE(BAUD_RATE)     ((float)(64 * 4000000 / (16 * (float)BAUD_RATE)) + 0.5)
+#define F_CPU                           (24000000UL)         /* using default clock 4MHz*/
+#define USART1_BAUD_RATE(BAUD_RATE)     ((float)(64 * F_CPU / (16 * (float)BAUD_RATE)) + 0.5)
+#define PERIOD_EXAMPLE_VALUE			(0x8C4F)
 #include <avr/io.h>
 #include <util/delay.h>
 #include<avr/interrupt.h>
 
+#define SEEK_STOP 0
+#define SEEK_0 1
+#define SEEK_VALUE 2
+#define SEEK_PLUS 0
+#define SEEK_MINUS 1
+#define SEEK_INIT_VAL 255
+#define SEEK_MAX 79
 void USART1_sendString(const char* string);
 volatile uint8_t buffer_out[100];
 volatile uint8_t buffer_size=0;
 
+volatile uint8_t seek_mode=0;
+volatile uint8_t seek_curr_pos=SEEK_INIT_VAL;
+volatile uint8_t seek_next_pos=0;
+
+
+
+void CLK_Init(void){   
+    _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, CLKCTRL_FREQSEL_24M_gc);    
+    _PROTECTED_WRITE (CLKCTRL.XOSC32KCTRLA, CLKCTRL_ENABLE_bm);
+    _PROTECTED_WRITE (CLKCTRL.MCLKCTRLA, (CLKCTRL_CLKSEL_OSCHF_gc | CLKCTRL_CLKOUT_bm));
+}
+
 ISR(USART1_RXC_vect){
     switch(USART1.RXDATAL){
-        case '0': PORTA.OUTTGL = PIN0_bm; //drive
-                  (PORTA.OUT & PIN0_bm)? USART1_sendString("Drive Desligada"): USART1_sendString("Drive Ligada");
+        case '0': PORTA.OUTTGL = PIN2_bm; //drive
+                  (PORTA.OUT & PIN2_bm)? USART1_sendString("Drive Desligada"): USART1_sendString("Drive Ligada");
                   break;
-        case '1': PORTA.OUTTGL = PIN1_bm; //MOTOR
-                  (PORTA.OUT & PIN0_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado")  ;
+        case '1': PORTA.OUTTGL = PIN3_bm; //MOTOR
+                  (PORTA.OUT & PIN3_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado");
       break;
         default: break;
         
@@ -55,15 +75,142 @@ ISR(USART1_TXC_vect){
     }
 }
 
+ISR(TCA1_OVF_vect){
+    static uint8_t seek_firstINT_passed=0;
+    TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+    PORTA.OUTTGL = PIN0_bm; //drive
+    switch(seek_mode){
+        
+        case SEEK_0: 
+            if(PORTC.OUT & PIN7_bm){ //chegou a 0
+                TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
+                seek_curr_pos=0;
+                TCA1.SINGLE.CNT=0;
+                TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+                seek_mode=SEEK_STOP;
+                return;
+            }
+        case SEEK_VALUE:
+            if(seek_firstINT_passed==1){
+                if((PORTE.OUT & PIN0_bm)==SEEK_PLUS){// direcao positiva
+                    seek_curr_pos++;
+                }
+                if((PORTE.OUT & PIN0_bm)==SEEK_MINUS){// direcao positiva
+                    seek_curr_pos--;
+                }
+            }
+            else
+                seek_firstINT_passed=1;
+            if(seek_curr_pos==seek_next_pos){
+                TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
+                TCA1.SINGLE.CNT=0;
+                TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+                seek_mode=SEEK_STOP;
+                seek_firstINT_passed=0;
+                return;
+            }
+            break;
+        case SEEK_STOP:
+        default:
+            TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
+            TCA1.SINGLE.CNT=0;
+            TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+            seek_firstINT_passed=0;
+            return;
+    }
+    
+    
+}
+
+
+int move_head(uint8_t mode, uint8_t new_pos){
+    int8_t delta=255;
+    switch(mode){
+        case SEEK_VALUE: 
+            if (new_pos>SEEK_MAX)
+                return 255;
+            if(seek_curr_pos!=SEEK_INIT_VAL){
+                delta=(int8_t)new_pos-(int8_t)seek_curr_pos;
+                if(delta==0) //mesma posicao
+                    return delta;
+                if(delta>0){//avancar posçao{
+                    if((PORTE.OUT & PIN0_bm)!=SEEK_PLUS) // direçao negativa __ ATENcao:SEEK_PLUS<<PIN0_bm
+                        PORTE.OUTTGL=PIN0_bm;
+                              
+                }
+                else //recuar
+                    if((PORTE.OUT & PIN0_bm)!=SEEK_MINUS) // direçao positiva __ ATENcao:SEEK_PLUS<<PIN0_bm
+                        PORTE.OUTTGL=PIN0_bm;
+                
+                seek_next_pos=new_pos;
+                seek_mode=SEEK_VALUE;
+                TCA1.SINGLE.CNT=0;
+                TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+                TCA1.SINGLE.CTRLA |=  TCA_SINGLE_ENABLE_bm;		/* start timer */
+                break;
+            }
+            else;//posicao nao inicializada continua no proximo case
+        case SEEK_0:    
+            if(PORTC.OUT & PIN7_bm){
+                seek_curr_pos=0;
+                return 0;
+            }
+            else{
+                delta=0;
+                if((PORTE.OUT & PIN0_bm)!=SEEK_MINUS) // direçao negativa __ ATENcao:SEEK_PLUS<<PIN0_bm
+                        PORTE.OUTTGL=PIN0_bm;
+                seek_mode=SEEK_0;
+                TCA1.SINGLE.CNT=0;
+                TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+                TCA1.SINGLE.CTRLA |=  TCA_SINGLE_ENABLE_bm;		/* start timer */
+                break;
+            }
+        default:
+            return 255;
+    }
+        while(seek_mode==SEEK_STOP); //esperar pelo fim do processo--> bloqueante
+        
+        return delta;
+}
+                        
+                    
+                    
+                    
+                
+
+
+void PWM_init(void){
+	PORTMUX.TCAROUTEA = PORTMUX_TCA10_bm;			/* set waveform output on PORT C */
+
+    TCA1.SINGLE.CTRLB = TCA_SINGLE_CMP2EN_bm                    /* enable compare channel 2 */
+                      | TCA_SINGLE_WGMODE_DSBOTTOM_gc ;		/* single-slope PWM mode */
+    
+    TCA1.SINGLE.PER = PERIOD_EXAMPLE_VALUE;			/* set PWM frequency*/
+    
+    TCA1.SINGLE.INTCTRL= TCA_SINGLE_OVF_bm;
+    
+    TCA1.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc;/* set clock source (sys_clk/1) */
+                      //| TCA_SINGLE_ENABLE_bm;		/* start timer */
+    TCA1.SINGLE.CMP2 = PERIOD_EXAMPLE_VALUE*0.95;
+
+}
 
 void IO_init(void){
     
-    PORTA.DIRSET = PIN0_bm;//DRIVE
-    PORTA.OUTSET = PIN0_bm;//DRIVE OFF
+    PORTA.DIRSET = PIN2_bm;//DRIVE
+    //PORTA.OUTSET = PIN2_bm;//DRIVE OFF
+    PORTA.OUTCLR = PIN2_bm;//DRIVE ON
     
-    PORTA.DIRSET = PIN1_bm;//Motor
-    PORTA.OUTSET = PIN1_bm;//motor OFF
+    PORTA.DIRSET = PIN3_bm;//Motor
+    PORTA.OUTSET = PIN3_bm;//motor OFF
     
+    PORTC.DIRSET = PIN6_bm;//step PWM
+    
+    PORTE.DIRSET = PIN0_bm;//seek_dir
+    PORTE.OUTSET = PIN0_bm;//pos neg
+            
+    PORTC.DIRCLR = PIN7_bm;//seek0
+    PORTC.PIN7CTRL &=~(PORT_PULLUPEN_bp);
  
 
 }
@@ -89,6 +236,7 @@ void USART1_sendString(const char* string)
     buffer_size=i;
     while(!(USART1.STATUS & USART_DREIF_bm));
     USART1.TXDATAL = '\n';
+   
     
 }
 
@@ -104,22 +252,33 @@ int main (void)
 
 
 
-
+    CLK_Init();
 
 
     IO_init();
+    
+    //TCA1.SINGLE.CMP2 = dutyCycle;
     USART1_init();
+    PWM_init();
     sei();
+    move_head(SEEK_0,0);
     while (1) 
     {
-         
-
         
+        for(int i=5; i<80; i=i+5){
+            move_head(SEEK_VALUE,i);
+            _delay_ms(400);
+        }
+        move_head(SEEK_0,0);
+            
     }
 }
     
     
-    
+
+
+
+
     
     
  
