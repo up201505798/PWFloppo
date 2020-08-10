@@ -92,7 +92,7 @@ ISR(TCA1_OVF_vect){
     switch(seek_mode){
         
         case SEEK_VALUE:
-            if(!(!(PORTE.IN & PIN1_bm)&& seek_curr_pos!=0)){ //Evitar encravamento no 0
+            if(!(!(PORTE.IN & PIN3_bm)&& seek_curr_pos!=0)){ //Evitar encravamento no 0
                 if(seek_firstINT_passed==1){
                     if((PORTE.OUT & PIN0_bm)==SEEK_PLUS){// direcao positiva
                         seek_curr_pos++;
@@ -115,7 +115,7 @@ ISR(TCA1_OVF_vect){
             }
             else ; //erro  detetado fora no 0
         case SEEK_0: 
-            if(!(PORTE.IN & PIN1_bm)){ //chegou a 0
+            if(!(PORTE.IN & PIN3_bm)){ //chegou a 0
                 TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
                 seek_curr_pos=0;
                 TCA1.SINGLE.CNT=0;
@@ -141,10 +141,10 @@ ISR(TCA1_OVF_vect){
 ISR(PORTE_PORT_vect){
     if(PORTE.INTFLAGS&PIN2_bm){ //INTERRUCAO INDEX
         PORTE.INTFLAGS&=~(PIN2_bm);
-        if(PORTE.IN & PIN2_bm) //INDEX pos
+      /*  if(PORTE.IN & PIN2_bm) //INDEX pos
             PORTE.OUTSET=PIN3_bm;
         else
-            PORTE.OUTCLR=PIN3_bm;
+            PORTE.OUTCLR=PIN3_bm;*/
     }
 }
 int move_head(uint8_t mode, uint8_t new_pos){
@@ -233,14 +233,14 @@ void IO_init(void){
     PORTE.DIRSET = PIN0_bm;//seek_dir
     PORTE.OUTSET = PIN0_bm;//pos neg
             
-    PORTE.DIRCLR = PIN1_bm;//seek0
+    PORTE.DIRCLR = PIN3_bm;//seek0
    //PORTE.PIN1CTRL &=~(PORT_PULLUPEN_bm);
-    PORTE.PIN1CTRL =0;
+    PORTE.PIN3CTRL =0;
     
     PORTE.DIRCLR= PIN2_bm; //INDEX
     PORTE.PIN2CTRL=1; //INT BOTHEDGES & pull_up disabled
  
-    PORTE.DIRSET= PIN3_bm; //debug;
+  //  PORTE.DIRSET= PIN3_bm; //debug;
 }
 void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
@@ -290,7 +290,7 @@ int main (void)
     PWM_init();
     sei();
      move_head(SEEK_0,0); 
-    while (1);/*  
+    while (1)
     { 
          
         for(int i=0; i<80; i=i+1){ 
@@ -299,7 +299,7 @@ int main (void)
         } 
         move_head(SEEK_0,0); 
              
-    }*/ 
+    }
 }
     
     
