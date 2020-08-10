@@ -138,7 +138,15 @@ ISR(TCA1_OVF_vect){
     
 }
 
-
+ISR(PORTE_PORT_vect){
+    if(PORTE.INTFLAGS&PIN2_bm){ //INTERRUCAO INDEX
+        PORTE.INTFLAGS&=~(PIN2_bm);
+        if(PORTE.IN & PIN2_bm) //INDEX pos
+            PORTE.OUTSET=PIN3_bm;
+        else
+            PORTE.OUTCLR=PIN3_bm;
+    }
+}
 int move_head(uint8_t mode, uint8_t new_pos){
     int8_t delta=127;
     switch(mode){
@@ -227,9 +235,12 @@ void IO_init(void){
             
     PORTE.DIRCLR = PIN1_bm;//seek0
    //PORTE.PIN1CTRL &=~(PORT_PULLUPEN_bm);
-    PORTE.PIN1CTRL &=~(PORT_INVEN_bm);
+    PORTE.PIN1CTRL =0;
+    
+    PORTE.DIRCLR= PIN2_bm; //INDEX
+    PORTE.PIN2CTRL=1; //INT BOTHEDGES & pull_up disabled
  
-
+    PORTE.DIRSET= PIN3_bm; //debug;
 }
 void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
@@ -279,7 +290,7 @@ int main (void)
     PWM_init();
     sei();
      move_head(SEEK_0,0); 
-    while (1)  
+    while (1);/*  
     { 
          
         for(int i=0; i<80; i=i+1){ 
@@ -288,7 +299,7 @@ int main (void)
         } 
         move_head(SEEK_0,0); 
              
-    } 
+    }*/ 
 }
     
     
