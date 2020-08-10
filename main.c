@@ -20,6 +20,7 @@
 #define F_CPU                           (24000000UL)         /* using default clock 4MHz*/
 #define USART1_BAUD_RATE(BAUD_RATE)     ((float)(64 * F_CPU / (16 * (float)BAUD_RATE)) + 0.5)
 #define PERIOD_EXAMPLE_VALUE			(0x8C4F)
+#define PERIOD_EXAMPLE_VALUE1			(0xFE)
 #include <avr/io.h>
 #include <util/delay.h>
 #include<avr/interrupt.h>
@@ -41,7 +42,7 @@ volatile uint8_t seek_next_pos=0;
 
 
 volatile uint8_t debug_var=0;
-
+volatile uint8_t state=0;
 
 void CLK_Init(void){   
     _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, CLKCTRL_FREQSEL_24M_gc);    
@@ -138,6 +139,32 @@ ISR(TCA1_OVF_vect){
     
 }
 
+
+
+ISR(TCA0_OVF_vect){
+   // static uint8_t state=0;
+    TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_CMP1_bm;
+    
+    switch(state){
+        case 0:
+            TCA0.SINGLE.PERBUF=PERIOD_EXAMPLE_VALUE1;
+           TCA0.SINGLE.CMP1BUF=PERIOD_EXAMPLE_VALUE1/2; 
+            break;
+        case 1:    
+            TCA0.SINGLE.PERBUF=PERIOD_EXAMPLE_VALUE1/2;
+            TCA0.SINGLE.CMP1BUF=PERIOD_EXAMPLE_VALUE1/4;
+            break;
+        case 2:    
+        TCA0.SINGLE.PERBUF=PERIOD_EXAMPLE_VALUE1/4;
+        TCA0.SINGLE.CMP1BUF=PERIOD_EXAMPLE_VALUE1/8;
+        break;
+            
+    }
+    state=(state+1)%2;
+    TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm |TCA_SINGLE_CMP1BV_bm;
+    
+}
+
 ISR(PORTE_PORT_vect){
     if(PORTE.INTFLAGS&PIN2_bm){ //INTERRUCAO INDEX
         PORTE.INTFLAGS&=~(PIN2_bm);
@@ -203,8 +230,8 @@ int move_head(uint8_t mode, uint8_t new_pos){
                 
 
 
-void PWM_init(void){
-	PORTMUX.TCAROUTEA = PORTMUX_TCA10_bm;			/* set waveform output on PORT C */
+void PWM_stepper_init(void){
+	PORTMUX.TCAROUTEA |= PORTMUX_TCA10_bm;			/* set waveform output on PORT C */
 
     TCA1.SINGLE.CTRLB = TCA_SINGLE_CMP2EN_bm                    /* enable compare channel 2 */
                       | TCA_SINGLE_WGMODE_DSBOTTOM_gc ;		/* single-slope PWM mode */
@@ -216,6 +243,28 @@ void PWM_init(void){
     TCA1.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc;/* set clock source (sys_clk/1) */
                       //| TCA_SINGLE_ENABLE_bm;		/* start timer */
     TCA1.SINGLE.CMP2 = PERIOD_EXAMPLE_VALUE*0.95;
+
+}
+
+void PWM_dataout_init(void){
+	PORTMUX.TCAROUTEA |= PORTMUX_TCA02_bm;			/* set waveform output on PORT E */
+
+    TCA0.SINGLE.CTRLB = TCA_SINGLE_CMP1EN_bm                    /* enable compare channel 1 */
+                     // |  TCA_SINGLE_ALUPD_bm 
+                      | TCA_SINGLE_WGMODE_SINGLESLOPE_gc; 		/* single-slope PWM mode */
+                    //  |TCA_SINGLE_ALUPD_bm;
+  
+    
+  // TCA0.SINGLE.CTRLESET=TCA_SINGLE_LUPD_bp;
+    
+    TCA0.SINGLE.PER = PERIOD_EXAMPLE_VALUE;			/* set PWM frequency*/
+    
+    TCA0.SINGLE.INTCTRL= TCA_SINGLE_OVF_bm ;
+    
+    
+    TCA0.SINGLE.CMP1 = PERIOD_EXAMPLE_VALUE*0.95;
+    TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc/* set clock source (sys_clk/1) */
+                      | TCA_SINGLE_ENABLE_bm;		/* start timer */
 
 }
 
@@ -240,7 +289,7 @@ void IO_init(void){
     PORTE.DIRCLR= PIN2_bm; //INDEX
     PORTE.PIN2CTRL=1; //INT BOTHEDGES & pull_up disabled
  
-  //  PORTE.DIRSET= PIN3_bm; //debug;
+    PORTE.DIRSET= PIN1_bm; //data out
 }
 void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
@@ -287,10 +336,12 @@ int main (void)
     
     //TCA1.SINGLE.CMP2 = dutyCycle;
     USART1_init();
-    PWM_init();
+    PWM_stepper_init();
+    PWM_dataout_init();
     sei();
+    while(1);
      move_head(SEEK_0,0); 
-    while (1)
+    while (1);
     { 
          
         for(int i=0; i<80; i=i+1){ 
