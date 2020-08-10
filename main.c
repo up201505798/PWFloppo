@@ -40,6 +40,8 @@ volatile uint8_t seek_curr_pos=SEEK_INIT_VAL;
 volatile uint8_t seek_next_pos=0;
 
 
+volatile uint8_t debug_var=0;
+
 
 void CLK_Init(void){   
     _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, CLKCTRL_FREQSEL_24M_gc);    
@@ -52,16 +54,23 @@ ISR(USART1_RXC_vect){
         case '0': PORTA.OUTTGL = PIN2_bm; //drive
                   (PORTA.OUT & PIN2_bm)? USART1_sendString("Drive Desligada"): USART1_sendString("Drive Ligada");
                   break;
-        case '1': PORTA.OUTTGL = PIN3_bm; //MOTOR
-                  (PORTA.OUT & PIN3_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado");
-      break;
+        case '1':PORTA.OUTTGL = PIN3_bm; //MOTOR
+                 (PORTA.OUT & PIN3_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado");
+                 break;
+        case '2':debug_var=1;
+                break;
+        case '3':debug_var=2;
+                break;   
+        case '4':debug_var=3;
+        break;   
+                 
         default: break;
         
     } 
 }
 
 ISR(USART1_TXC_vect){
-   
+    USART1.STATUS|=USART_TXCIF_bm;
     static uint8_t position=0;
     if(position<buffer_size){
         while(!(USART1.STATUS & USART_DREIF_bm));
@@ -77,46 +86,53 @@ ISR(USART1_TXC_vect){
 
 ISR(TCA1_OVF_vect){
     static uint8_t seek_firstINT_passed=0;
+   // USART1_sendString("a");
     TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
-    PORTA.OUTTGL = PIN0_bm; //drive
+   // PORTA.OUTTGL = PIN0_bm; //drive
     switch(seek_mode){
         
+        case SEEK_VALUE:
+            if(!(!(PORTE.IN & PIN1_bm)&& seek_curr_pos!=0)){ //Evitar encravamento no 0
+                if(seek_firstINT_passed==1){
+                    if((PORTE.OUT & PIN0_bm)==SEEK_PLUS){// direcao positiva
+                        seek_curr_pos++;
+                    }
+                    if((PORTE.OUT & PIN0_bm)==SEEK_MINUS){// direcao positiva
+                        seek_curr_pos--;
+                    }
+                }
+                else
+                    seek_firstINT_passed=1;
+                if(seek_curr_pos==seek_next_pos){
+                    TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
+                    TCA1.SINGLE.CNT=0;
+                    TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+                    seek_mode=SEEK_STOP;
+                    seek_firstINT_passed=0;
+                    break;
+                }
+                break;
+            }
+            else ; //erro  detetado fora no 0
         case SEEK_0: 
-            if(PORTC.OUT & PIN7_bm){ //chegou a 0
+            if(!(PORTE.IN & PIN1_bm)){ //chegou a 0
                 TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
                 seek_curr_pos=0;
                 TCA1.SINGLE.CNT=0;
                 TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
                 seek_mode=SEEK_STOP;
-                return;
-            }
-        case SEEK_VALUE:
-            if(seek_firstINT_passed==1){
-                if((PORTE.OUT & PIN0_bm)==SEEK_PLUS){// direcao positiva
-                    seek_curr_pos++;
-                }
-                if((PORTE.OUT & PIN0_bm)==SEEK_MINUS){// direcao positiva
-                    seek_curr_pos--;
-                }
-            }
-            else
-                seek_firstINT_passed=1;
-            if(seek_curr_pos==seek_next_pos){
-                TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
-                TCA1.SINGLE.CNT=0;
-                TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
-                seek_mode=SEEK_STOP;
                 seek_firstINT_passed=0;
-                return;
+                
             }
             break;
+        
         case SEEK_STOP:
         default:
             TCA1.SINGLE.CTRLA &=  ~TCA_SINGLE_ENABLE_bm;		/* stop timer */
             TCA1.SINGLE.CNT=0;
             TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
             seek_firstINT_passed=0;
-            return;
+            break;
     }
     
     
@@ -124,7 +140,7 @@ ISR(TCA1_OVF_vect){
 
 
 int move_head(uint8_t mode, uint8_t new_pos){
-    int8_t delta=255;
+    int8_t delta=127;
     switch(mode){
         case SEEK_VALUE: 
             if (new_pos>SEEK_MAX)
@@ -151,11 +167,11 @@ int move_head(uint8_t mode, uint8_t new_pos){
             }
             else;//posicao nao inicializada continua no proximo case
         case SEEK_0:    
-            if(PORTC.OUT & PIN7_bm){
+           /* if(!(PORTE.OUT & PIN1_bm)){
                 seek_curr_pos=0;
                 return 0;
             }
-            else{
+            else{*/
                 delta=0;
                 if((PORTE.OUT & PIN0_bm)!=SEEK_MINUS) // direçao negativa __ ATENcao:SEEK_PLUS<<PIN0_bm
                         PORTE.OUTTGL=PIN0_bm;
@@ -164,11 +180,11 @@ int move_head(uint8_t mode, uint8_t new_pos){
                 TCA1.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
                 TCA1.SINGLE.CTRLA |=  TCA_SINGLE_ENABLE_bm;		/* start timer */
                 break;
-            }
+          //  }
         default:
             return 255;
     }
-        while(seek_mode==SEEK_STOP); //esperar pelo fim do processo--> bloqueante
+        while(seek_mode!=SEEK_STOP); //esperar pelo fim do processo--> bloqueante
         
         return delta;
 }
@@ -209,8 +225,9 @@ void IO_init(void){
     PORTE.DIRSET = PIN0_bm;//seek_dir
     PORTE.OUTSET = PIN0_bm;//pos neg
             
-    PORTC.DIRCLR = PIN7_bm;//seek0
-    PORTC.PIN7CTRL &=~(PORT_PULLUPEN_bp);
+    PORTE.DIRCLR = PIN1_bm;//seek0
+   //PORTE.PIN1CTRL &=~(PORT_PULLUPEN_bm);
+    PORTE.PIN1CTRL &=~(PORT_INVEN_bm);
  
 
 }
@@ -261,17 +278,17 @@ int main (void)
     USART1_init();
     PWM_init();
     sei();
-    move_head(SEEK_0,0);
-    while (1) 
-    {
-        
-        for(int i=5; i<80; i=i+5){
-            move_head(SEEK_VALUE,i);
-            _delay_ms(400);
-        }
-        move_head(SEEK_0,0);
-            
-    }
+     move_head(SEEK_0,0); 
+    while (1)  
+    { 
+         
+        for(int i=0; i<80; i=i+1){ 
+            move_head(SEEK_VALUE,i); 
+            _delay_ms(100);
+        } 
+        move_head(SEEK_0,0); 
+             
+    } 
 }
     
     
