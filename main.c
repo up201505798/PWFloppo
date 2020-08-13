@@ -34,6 +34,9 @@
 #define SEEK_MAX 79
 
 #define BUF_MAX 255
+#define BUF_MAXIMO 254
+#define BUF_BIG 512
+#define BUF_MAIOR 511
 void USART1_sendString(const char* string);
 volatile uint8_t buffer_out[100];
 volatile uint8_t buffer_size=0;
@@ -45,9 +48,9 @@ volatile uint8_t seek_next_pos=0;
 
 volatile uint8_t debug_var=0;
 //volatile uint8_t state=0;
+ 
+    
 
-static uint8_t counter asm ("counter");
-static  uint8_t selector asm ("selector");
 void PWM_dataout_init(void);
 
 void CLK_Init(void){   
@@ -154,39 +157,53 @@ ISR(TCA1_OVF_vect){
     
 }
 
-volatile uint8_t buf1[BUF_MAX+1] asm ("buf1");
-volatile uint8_t buf2[BUF_MAX+1] asm ("buf2");
+volatile uint8_t buf[2][BUF_MAX];
+volatile uint8_t buf1[BUF_BIG];
 
 void buf_init(void){
-    counter=BUF_MAX;
-    selector=0;
+   
+    
     for(int i =0;i<BUF_MAX;i++){
         if(i%2){
-            buf1[i]=80;
-            buf2[i]=80;
+            buf[0][i]=80;
+            buf[1][i]=80;
         }
         else{
-            buf1[i]=160;
-            buf2[i]=160;
+            buf[0][i]=120;
+            buf[1][i]=120;
         }
-          
+    }
+    for(uint16_t i =0;i<BUF_BIG;i++){
+        if(i%2){
+            buf1[i]=80;
+            
+        }
+        else{
+            buf1[i]=120;
+           
+        }
     }
 }
 ISR (TCA0_OVF_vect) {
     PORTB.OUTSET=PIN4_bm;
-   
- 
-
-    while(TCA0.SINGLE.CTRLFSET&TCA_SINGLE_PERBV_bm);
-    static uint8_t state=0;
     TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+    //static uint8_t counter=0;
+    static uint16_t counter=0;
+   // static  uint8_t selector=0;
+
+    TCA0.SINGLE.PERBUF=buf1[counter];
     
-    if(state)
-        TCA0.SINGLE.PERBUF=160;
-    else
-        TCA0.SINGLE.PERBUF=80;
+    //TCA0.SINGLE.PERBUF=buf[selector][counter];
+    counter++;
     
-    state=!state;
+   // if(counter==BUF_MAXIMO){
+    if(counter==BUF_BIG){
+        //selector=!selector;
+        counter=0;
+    }
+    
+    
+   
     TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm;
     PORTB.OUTCLR=PIN4_bm;
      
@@ -377,6 +394,7 @@ int main (void)
     //TCA1.SINGLE.CMP2 = dutyCycle;
     USART1_init();
     PWM_stepper_init();
+    buf_init();
     PWM_dataout_init();
     sei();
     while(1);
