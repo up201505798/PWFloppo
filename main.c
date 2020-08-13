@@ -20,9 +20,9 @@
 #define F_CPU                           (24000000UL)         /* using default clock 4MHz*/
 #define USART1_BAUD_RATE(BAUD_RATE)     ((float)(64 * F_CPU / (16 * (float)BAUD_RATE)) + 0.5)
 #define PERIOD_EXAMPLE_VALUE			(0x8C4F)
-#define PERIOD_EXAMPLE_VALUE1			(0xFE)
+#define PERIOD_EXAMPLE_VALUE1			(0xA0)
 #include <avr/io.h>
-#include <util/delay.h>
+//#include <util/delay.h>
 #include<avr/interrupt.h>
 
 #define SEEK_STOP 0
@@ -32,6 +32,8 @@
 #define SEEK_MINUS 1
 #define SEEK_INIT_VAL 255
 #define SEEK_MAX 79
+
+#define BUF_MAX 255
 void USART1_sendString(const char* string);
 volatile uint8_t buffer_out[100];
 volatile uint8_t buffer_size=0;
@@ -42,7 +44,11 @@ volatile uint8_t seek_next_pos=0;
 
 
 volatile uint8_t debug_var=0;
-volatile uint8_t state=0;
+//volatile uint8_t state=0;
+
+static uint8_t counter asm ("counter");
+static  uint8_t selector asm ("selector");
+void PWM_dataout_init(void);
 
 void CLK_Init(void){   
     _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, CLKCTRL_FREQSEL_24M_gc);    
@@ -55,12 +61,21 @@ ISR(USART1_RXC_vect){
         case '0': PORTA.OUTTGL = PIN2_bm; //drive
                   (PORTA.OUT & PIN2_bm)? USART1_sendString("Drive Desligada"): USART1_sendString("Drive Ligada");
                   break;
-        case '1':PORTA.OUTTGL = PIN3_bm; //MOTOR
-                 (PORTA.OUT & PIN3_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado");
-                 break;
-        case '2':debug_var=1;
-                break;
-        case '3':debug_var=2;
+        case '1': PORTA.OUTTGL = PIN3_bm; //MOTOR
+                  (PORTA.OUT & PIN3_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado");
+                  
+                  break;
+        case '2':
+                 
+                 
+                  PWM_dataout_init();
+                 // USART1_sendString("Escrita");
+                  break;
+        case '3':
+                  TCA0.SINGLE.CTRLA&=~(TCA_SINGLE_ENABLE_bm);
+                 PORTB.OUTSET = PIN5_bm; //leitura
+                
+                //USART1_sendString("Leitura");
                 break;   
         case '4':debug_var=3;
         break;   
@@ -139,39 +154,58 @@ ISR(TCA1_OVF_vect){
     
 }
 
+volatile uint8_t buf1[BUF_MAX+1] asm ("buf1");
+volatile uint8_t buf2[BUF_MAX+1] asm ("buf2");
 
-
-ISR(TCA0_OVF_vect){
-   // static uint8_t state=0;
-    TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_CMP1_bm;
-    
-    switch(state){
-        case 0:
-            TCA0.SINGLE.PERBUF=PERIOD_EXAMPLE_VALUE1;
-           TCA0.SINGLE.CMP1BUF=PERIOD_EXAMPLE_VALUE1/2; 
-            break;
-        case 1:    
-            TCA0.SINGLE.PERBUF=PERIOD_EXAMPLE_VALUE1/2;
-            TCA0.SINGLE.CMP1BUF=PERIOD_EXAMPLE_VALUE1/4;
-            break;
-        case 2:    
-        TCA0.SINGLE.PERBUF=PERIOD_EXAMPLE_VALUE1/4;
-        TCA0.SINGLE.CMP1BUF=PERIOD_EXAMPLE_VALUE1/8;
-        break;
-            
+void buf_init(void){
+    counter=BUF_MAX;
+    selector=0;
+    for(int i =0;i<BUF_MAX;i++){
+        if(i%2){
+            buf1[i]=80;
+            buf2[i]=80;
+        }
+        else{
+            buf1[i]=160;
+            buf2[i]=160;
+        }
+          
     }
-    state=(state+1)%2;
-    TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm |TCA_SINGLE_CMP1BV_bm;
+}
+ISR (TCA0_OVF_vect) {
+    PORTB.OUTSET=PIN4_bm;
+   
+ 
+
+    while(TCA0.SINGLE.CTRLFSET&TCA_SINGLE_PERBV_bm);
+    static uint8_t state=0;
+    TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
     
+    if(state)
+        TCA0.SINGLE.PERBUF=160;
+    else
+        TCA0.SINGLE.PERBUF=80;
+    
+    state=!state;
+    TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm;
+    PORTB.OUTCLR=PIN4_bm;
+     
 }
 
 ISR(PORTE_PORT_vect){
     if(PORTE.INTFLAGS&PIN2_bm){ //INTERRUCAO INDEX
+        static uint8_t first_pass=1;
         PORTE.INTFLAGS&=~(PIN2_bm);
-      /*  if(PORTE.IN & PIN2_bm) //INDEX pos
-            PORTE.OUTSET=PIN3_bm;
-        else
-            PORTE.OUTCLR=PIN3_bm;*/
+        if((PORTE.IN&PIN2_bm)&&!(PORTB.OUT&PIN5_bm)){
+            if(first_pass)
+                first_pass=0;
+            else
+                PWM_dataout_init();
+        }
+        if(!(PORTE.IN&PIN2_bm)&&(TCA0.SINGLE.CTRLA&TCA_SINGLE_ENABLE_bm)){
+            TCA0.SINGLE.CTRLA&=~TCA_SINGLE_ENABLE_bm;
+            PORTB.OUTSET=PIN5_bm;
+        }
     }
 }
 int move_head(uint8_t mode, uint8_t new_pos){
@@ -257,12 +291,12 @@ void PWM_dataout_init(void){
     
   // TCA0.SINGLE.CTRLESET=TCA_SINGLE_LUPD_bp;
     
-    TCA0.SINGLE.PER = PERIOD_EXAMPLE_VALUE;			/* set PWM frequency*/
+    TCA0.SINGLE.PER = PERIOD_EXAMPLE_VALUE1;			/* set PWM frequency*/
     
     TCA0.SINGLE.INTCTRL= TCA_SINGLE_OVF_bm ;
     
-    
-    TCA0.SINGLE.CMP1 = PERIOD_EXAMPLE_VALUE*0.95;
+  // TCA0.SINGLE.CTRLESET=TCA_SINGLE_DIR_bm;
+    TCA0.SINGLE.CMP1 = PERIOD_EXAMPLE_VALUE1*0.05;
     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc/* set clock source (sys_clk/1) */
                       | TCA_SINGLE_ENABLE_bm;		/* start timer */
 
@@ -290,6 +324,12 @@ void IO_init(void){
     PORTE.PIN2CTRL=1; //INT BOTHEDGES & pull_up disabled
  
     PORTE.DIRSET= PIN1_bm; //data out
+    PORTE.PIN1CTRL=PORT_INVEN_bm;
+    
+    PORTB.DIRSET= PIN5_bm; //Write gate
+    PORTB.OUTSET = PIN5_bm; //Modo escrita
+     
+    PORTB.DIRSET= PIN4_bm;
 }
 void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
@@ -313,7 +353,7 @@ void USART1_sendString(const char* string)
     buffer_size=i;
     while(!(USART1.STATUS & USART_DREIF_bm));
     USART1.TXDATAL = '\n';
-   
+    
     
 }
 
@@ -340,17 +380,13 @@ int main (void)
     PWM_dataout_init();
     sei();
     while(1);
-     move_head(SEEK_0,0); 
-    while (1);
-    { 
-         
-        for(int i=0; i<80; i=i+1){ 
-            move_head(SEEK_VALUE,i); 
-            _delay_ms(100);
-        } 
-        move_head(SEEK_0,0); 
-             
-    }
+    while(debug_var==0);
+    PORTA.OUTCLR= PIN3_bm;//motor on;
+    PORTA.OUTCLR= PIN2_bm;//drive_on;
+   // _delay_ms(500);
+    move_head(SEEK_0,0);
+    PORTB.OUTCLR=PIN5_bm;    
+    while(1);
 }
     
     

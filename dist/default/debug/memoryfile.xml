@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?> 
 <project>                                  
-  <executable name="dist/default/production/PWFloppo.production.elf">                 
+  <executable name="dist/default/debug/PWFloppo.debug.elf">                 
     <memory name="program">              
       <units>bytes</units>                 
       <length>131072</length>                 
-      <used>2496</used>                     
-      <free>128576</free>                     
+      <used>2634</used>                     
+      <free>128438</free>                     
     </memory>                              
     <memory name="data">                 
       <units>bytes</units>                 
       <length>16384</length>                 
-      <used>621</used>                     
-      <free>15763</free>                     
+      <used>623</used>                     
+      <free>15761</free>                     
     </memory>                              
   </executable>                            
 </project>                                 
