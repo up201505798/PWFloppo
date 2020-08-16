@@ -33,10 +33,9 @@
 #define SEEK_INIT_VAL 255
 #define SEEK_MAX 79
 
-#define BUF_MAX 255
-#define BUF_MAXIMO 254
+
 #define BUF_BIG 512
-#define BUF_MAIOR 511
+
 void USART1_sendString(const char* string);
 volatile uint8_t buffer_out[100];
 volatile uint8_t buffer_size=0;
@@ -157,55 +156,65 @@ ISR(TCA1_OVF_vect){
     
 }
 
-volatile uint8_t buf[2][BUF_MAX];
-volatile uint8_t buf1[BUF_BIG];
+
+volatile uint8_t buf1[BUF_BIG] __attribute__((aligned(64))); ;
 
 void buf_init(void){
    
     
-    for(int i =0;i<BUF_MAX;i++){
-        if(i%2){
-            buf[0][i]=80;
-            buf[1][i]=80;
-        }
-        else{
-            buf[0][i]=120;
-            buf[1][i]=120;
-        }
-    }
+    
     for(uint16_t i =0;i<BUF_BIG;i++){
         if(i%2){
             buf1[i]=80;
             
         }
         else{
-            buf1[i]=120;
+            buf1[i]=90;
            
         }
     }
 }
 ISR (TCA0_OVF_vect) {
-    PORTB.OUTSET=PIN4_bm;
-    TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
+    asm volatile("push r16");
+    asm volatile("ldi r16,16");
+    asm volatile("sts 0x0425,r16");
+    //PORTB.OUTSET=PIN4_bm;
+    asm volatile("ldi r16,1");
+    asm volatile("sts 0x0A0B,r16");
+    //TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
     //static uint8_t counter=0;
-    static uint16_t counter=0;
+    static uint8_t counter=0;
    // static  uint8_t selector=0;
-
-    TCA0.SINGLE.PERBUF=buf1[counter];
     
-    //TCA0.SINGLE.PERBUF=buf[selector][counter];
+    
+    static uint8_t* use=buf1;
+    TCA0.SINGLE.PERBUF=use[counter];
     counter++;
+    //TCA0.SINGLE.PERBUF=buf[selector][counter];
+    //counter++;
     
    // if(counter==BUF_MAXIMO){
-    if(counter==BUF_BIG){
+    if(counter==255){
         //selector=!selector;
+        //static uint8_t* pointer1=&buf1[BUF_BIG/2];
+        static uint8_t state=0;
+        //static uint8_t* pointer0=buf1;
         counter=0;
+        state=!state;
+        if(state==0)
+            use=use-255;
+        else
+            use=use+255;
     }
     
     
    
-    TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm;
-    PORTB.OUTCLR=PIN4_bm;
+    asm volatile("sts 0x0A07,r16");
+    //TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm;
+    asm volatile("ldi r16,16");
+    asm volatile("sts 0x0426,r16");
+    asm volatile("pop r16");
+    //PORTB.OUTCLR=PIN4_bm;
      
 }
 
