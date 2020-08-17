@@ -162,15 +162,15 @@ volatile uint8_t buf1[BUF_BIG] __attribute__((aligned(64))); ;
 void buf_init(void){
    
     
-    
-    for(uint16_t i =0;i<BUF_BIG;i++){
+  
+    for(uint16_t i =0;i<256;i++){
         if(i%2){
             buf1[i]=80;
-            
+            buf1[i+256]=160;
         }
         else{
             buf1[i]=90;
-           
+           buf1[i+256]=180;
         }
     }
 }
@@ -183,32 +183,30 @@ ISR (TCA0_OVF_vect) {
     asm volatile("sts 0x0A0B,r16");
     //TCA0.SINGLE.INTFLAGS|=TCA_SINGLE_OVF_bm;
     //static uint8_t counter=0;
-    static uint8_t counter=0;
+    //static uint16_t counter=0;
    // static  uint8_t selector=0;
+    //uint16_t c=counter;
     
+    static uint8_t* pointer=buf1;
+    uint8_t* p=pointer;
+    TCA0.SINGLE.PERBUF=*p;
     
-    static uint8_t* use=buf1;
-    TCA0.SINGLE.PERBUF=use[counter];
-    counter++;
+    uint8_t comp1=(uint8_t)(++p);
+    
     //TCA0.SINGLE.PERBUF=buf[selector][counter];
     //counter++;
     
    // if(counter==BUF_MAXIMO){
-    if(counter==255){
-        //selector=!selector;
+    if(0==comp1){
+        p=(uint16_t)p & 0XFDFF;
         //static uint8_t* pointer1=&buf1[BUF_BIG/2];
-        static uint8_t state=0;
+        
         //static uint8_t* pointer0=buf1;
-        counter=0;
-        state=!state;
-        if(state==0)
-            use=use-255;
-        else
-            use=use+255;
+        
+        
     }
+    pointer=p;
     
-    
-   
     asm volatile("sts 0x0A07,r16");
     //TCA0.SINGLE.CTRLFSET|=TCA_SINGLE_PERBV_bm;
     asm volatile("ldi r16,16");
