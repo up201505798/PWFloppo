@@ -34,7 +34,7 @@
 #define SEEK_MAX 79
 
 
-#define BUF_BIG 512
+#define BUF_BIG 15360
 
 void USART1_sendString(const char* string);
 volatile uint8_t buffer_out[100];
@@ -163,14 +163,14 @@ void buf_init(void){
    
     
   
-    for(uint16_t i =0;i<256;i++){
+    for(uint16_t i =0;i<BUF_BIG;i++){
         if(i%2){
-            buf1[i]=80;
-            buf1[i+256]=160;
+            buf1[i]=75;
+            
         }
         else{
-            buf1[i]=90;
-           buf1[i+256]=180;
+            buf1[i]=75;
+           
         }
     }
 }
@@ -191,14 +191,14 @@ ISR (TCA0_OVF_vect) {
     uint8_t* p=pointer;
     TCA0.SINGLE.PERBUF=*p;
     
-    uint8_t comp1=(uint8_t)(++p);
+    uint8_t comp1=(uint8_t)(((uint16_t)(++p))>>8);
     
     //TCA0.SINGLE.PERBUF=buf[selector][counter];
     //counter++;
     
    // if(counter==BUF_MAXIMO){
-    if(0==comp1){
-        p=(uint16_t)p & 0XFDFF;
+    if(0b01111100==comp1){
+        p=(uint8_t*)0x4000;
         //static uint8_t* pointer1=&buf1[BUF_BIG/2];
         
         //static uint8_t* pointer0=buf1;
@@ -321,9 +321,8 @@ void PWM_dataout_init(void){
     
   // TCA0.SINGLE.CTRLESET=TCA_SINGLE_DIR_bm;
     TCA0.SINGLE.CMP1 = PERIOD_EXAMPLE_VALUE1*0.05;
-    TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc/* set clock source (sys_clk/1) */
-                      | TCA_SINGLE_ENABLE_bm;		/* start timer */
-
+     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc/* set clock source (sys_clk/1) */
+                       |TCA_SINGLE_ENABLE_bm;		/* start timer */
 }
 
 void IO_init(void){
@@ -399,8 +398,8 @@ int main (void)
     IO_init();
     
     //TCA1.SINGLE.CMP2 = dutyCycle;
-    USART1_init();
-    PWM_stepper_init();
+    //USART1_init();
+    //PWM_stepper_init();
     buf_init();
     PWM_dataout_init();
     sei();
