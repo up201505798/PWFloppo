@@ -48,7 +48,8 @@ volatile uint8_t seek_next_pos=0;
 volatile uint8_t debug_var=0;
 //volatile uint8_t state=0;
  
-    
+volatile uint8_t buf1[BUF_BIG] __attribute__((aligned(64))); ;
+
 
 void PWM_dataout_init(void);
 
@@ -59,48 +60,28 @@ void CLK_Init(void){
 }
 
 ISR(USART1_RXC_vect){
-    switch(USART1.RXDATAL){
-        case '0': PORTA.OUTTGL = PIN2_bm; //drive
-                  (PORTA.OUT & PIN2_bm)? USART1_sendString("Drive Desligada"): USART1_sendString("Drive Ligada");
-                  break;
-        case '1': PORTA.OUTTGL = PIN3_bm; //MOTOR
-                  (PORTA.OUT & PIN3_bm)?  USART1_sendString("Motor Desligado"):USART1_sendString("Motor Ligado");
-                  
-                  break;
-        case '2':
-                 
-                 
-                  PWM_dataout_init();
-                 // USART1_sendString("Escrita");
-                  break;
-        case '3':
-                  TCA0.SINGLE.CTRLA&=~(TCA_SINGLE_ENABLE_bm);
-                 PORTB.OUTSET = PIN5_bm; //leitura
-                
-                //USART1_sendString("Leitura");
-                break;   
-        case '4':debug_var=3;
-        break;   
-                 
-        default: break;
+    static uint8_t first=1;
+    if(first){
+        if(USART1.RXDATAL=='1'){
+            
+            USART1.CTRLB &= ~(USART_TXEN_bm) ;  
+            first=0;
+            return;
+        }
+    }
+    static uint16_t counter_rx=0;
+    buf1[counter_rx]=USART1.RXDATAL;
+    
+    if(++counter_rx==BUF_BIG){
+        counter_rx=0;
+        PWM_dataout_init();
         
-    } 
+    }
+        
+    
 }
 
-ISR(USART1_TXC_vect){
-    USART1.STATUS|=USART_TXCIF_bm;
-    static uint8_t position=0;
-    if(position<buffer_size){
-        while(!(USART1.STATUS & USART_DREIF_bm));
-   
-        USART1.TXDATAL = buffer_out[position];
-        position++;
-    }
-    else{
-        position=0;
-        buffer_size=0;
-    }
-}
+
 
 ISR(TCA1_OVF_vect){
     static uint8_t seek_firstINT_passed=0;
@@ -157,7 +138,6 @@ ISR(TCA1_OVF_vect){
 }
 
 
-volatile uint8_t buf1[BUF_BIG] __attribute__((aligned(64))); ;
 
 void buf_init(void){
    
@@ -174,7 +154,7 @@ void buf_init(void){
         }
     }
 }
-ISR (TCA0_OVF_vect) {
+ISR (TCA0_OVF_vect, ISR_NAKED) {
     asm volatile("push r16");
     asm volatile("ldi r16,16");
     asm volatile("sts 0x0425,r16");
@@ -199,6 +179,7 @@ ISR (TCA0_OVF_vect) {
    // if(counter==BUF_MAXIMO){
     if(0b01111100==comp1){
         p=(uint8_t*)0x4000;
+        TCA0.SINGLE.CTRLA &=~TCA_SINGLE_ENABLE_bm;	
         //static uint8_t* pointer1=&buf1[BUF_BIG/2];
         
         //static uint8_t* pointer0=buf1;
@@ -354,7 +335,7 @@ void IO_init(void){
      
     PORTB.DIRSET= PIN4_bm;
 }
-void USART1_init(void){
+ void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
     PORTC.DIRCLR = PIN1_bm;                             /* set pin 1 of PORT C (RXd) as input*/
     
@@ -363,8 +344,13 @@ void USART1_init(void){
     USART1.CTRLC = USART_CHSIZE0_bm
                  | USART_CHSIZE1_bm;                    /* set the data format to 8-bit*/
                  
-    USART1.CTRLA = USART_RXCIE_bm | USART_TXCIE_bm;   
+    USART1.CTRLA = USART_RXCIE_bm ;//| USART_TXCIE_bm;   
     USART1.CTRLB |= (USART_TXEN_bm |USART_RXEN_bm) ;                      /* enable transmitter*/
+    
+    
+    
+    PORTC.DIRCLR=PIN7_bm;
+    PORTC.PIN7CTRL|= PORT_PULLUPEN_bm;
 }
 
 void USART1_sendString(const char* string)
@@ -399,18 +385,26 @@ int main (void)
     
     //TCA1.SINGLE.CMP2 = dutyCycle;
     //USART1_init();
+    sei();
+    
+    while(1){
+      if(!(PORTC.IN &(PIN7_bm))) 
+          USART1.TXDATAL = '1';
+      while(!(PORTC.IN &(PIN7_bm)));
+    }
+    /*
     //PWM_stepper_init();
     buf_init();
     PWM_dataout_init();
     sei();
-    while(1);
+    
     while(debug_var==0);
     PORTA.OUTCLR= PIN3_bm;//motor on;
     PORTA.OUTCLR= PIN2_bm;//drive_on;
    // _delay_ms(500);
     move_head(SEEK_0,0);
     PORTB.OUTCLR=PIN5_bm;    
-    while(1);
+    while(1);*/
 }
     
     
