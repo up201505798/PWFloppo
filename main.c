@@ -51,7 +51,20 @@ volatile uint8_t debug_var=0;
 volatile uint8_t buf1[BUF_BIG] __attribute__((aligned(64))); ;
 
 
+volatile uint8_t write_mode=0;
+
+#define WRITE_OFF 0
+#define DELETE_TRACK 1
+#define FIND_SECTOR 2
+#define SAVE_SECTOR 3
+volatile uint8_t curr_sector=0;
+
+
+
 void PWM_dataout_init(void);
+
+
+
 
 void CLK_Init(void){   
     _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, CLKCTRL_FREQSEL_24M_gc);    
@@ -72,9 +85,12 @@ ISR(USART1_RXC_vect){
     static uint16_t counter_rx=0;
     buf1[counter_rx]=USART1.RXDATAL;
     
-    if(++counter_rx==BUF_BIG){
+    if(++counter_rx==(BUF_BIG-2)){
         counter_rx=0;
-        PWM_dataout_init();
+        write_mode=DELETE_TRACK;
+        PORTB.OUTCLR = PIN5_bm; //Modo escrita
+        PORTE.OUTSET = PIN1_bm;
+        //TCA0.SINGLE.CTRLA |=TCA_SINGLE_ENABLE_bm;		/* start timer */
         
     }
         
@@ -139,22 +155,8 @@ ISR(TCA1_OVF_vect){
 
 
 
-void buf_init(void){
-   
-    
-  
-    for(uint16_t i =0;i<BUF_BIG;i++){
-        if(i%2){
-            buf1[i]=75;
-            
-        }
-        else{
-            buf1[i]=75;
-           
-        }
-    }
-}
-ISR (TCA0_OVF_vect, ISR_NAKED) {
+
+ISR (TCA0_OVF_vect) {
     asm volatile("push r16");
     asm volatile("ldi r16,16");
     asm volatile("sts 0x0425,r16");
@@ -179,7 +181,9 @@ ISR (TCA0_OVF_vect, ISR_NAKED) {
    // if(counter==BUF_MAXIMO){
     if(0b01111100==comp1){
         p=(uint8_t*)0x4000;
-        TCA0.SINGLE.CTRLA &=~TCA_SINGLE_ENABLE_bm;	
+        TCA0.SINGLE.CTRLA &=~TCA_SINGLE_ENABLE_bm;
+        write_mode=WRITE_OFF;
+       // PORTB.OUTSET = PIN5_bm; //Modo leitura
         //static uint8_t* pointer1=&buf1[BUF_BIG/2];
         
         //static uint8_t* pointer0=buf1;
@@ -198,20 +202,33 @@ ISR (TCA0_OVF_vect, ISR_NAKED) {
 }
 
 ISR(PORTE_PORT_vect){
+    
     if(PORTE.INTFLAGS&PIN2_bm){ //INTERRUCAO INDEX
-        static uint8_t first_pass=1;
-        PORTE.INTFLAGS&=~(PIN2_bm);
-        if((PORTE.IN&PIN2_bm)&&!(PORTB.OUT&PIN5_bm)){
-            if(first_pass)
-                first_pass=0;
-            else
-                PWM_dataout_init();
+        
+        PORTE.INTFLAGS|=(PIN2_bm);
+        if((PORTE.IN&PIN2_bm)){
+            if(write_mode==DELETE_TRACK){//comeco
+                static uint8_t erase_passes=0;
+                if(erase_passes)
+                    erase_passes--;
+                else{
+                    erase_passes=0;
+                    TCA0.SINGLE.PER = 250;
+                    write_mode=SAVE_SECTOR;
+                    TCA0.SINGLE.CTRLA |=  TCA_SINGLE_ENABLE_bm;	
+                }
+            }
+            if(write_mode==WRITE_OFF){
+                PORTB.OUTSET = PIN5_bm; //Modo leitura
+            }
         }
-        if(!(PORTE.IN&PIN2_bm)&&(TCA0.SINGLE.CTRLA&TCA_SINGLE_ENABLE_bm)){
+            
+    }
+        /*if(!(PORTE.IN&PIN2_bm)&&(TCA0.SINGLE.CTRLA&TCA_SINGLE_ENABLE_bm)){
             TCA0.SINGLE.CTRLA&=~TCA_SINGLE_ENABLE_bm;
             PORTB.OUTSET=PIN5_bm;
-        }
-    }
+        }*/
+    
 }
 int move_head(uint8_t mode, uint8_t new_pos){
     int8_t delta=127;
@@ -286,6 +303,8 @@ void PWM_stepper_init(void){
 }
 
 void PWM_dataout_init(void){
+    buf1[BUF_BIG-1]=185;
+    buf1[BUF_BIG-2]=185;
 	PORTMUX.TCAROUTEA |= PORTMUX_TCA02_bm;			/* set waveform output on PORT E */
 
     TCA0.SINGLE.CTRLB = TCA_SINGLE_CMP1EN_bm                    /* enable compare channel 1 */
@@ -296,14 +315,14 @@ void PWM_dataout_init(void){
     
   // TCA0.SINGLE.CTRLESET=TCA_SINGLE_LUPD_bp;
     
-    TCA0.SINGLE.PER = PERIOD_EXAMPLE_VALUE1;			/* set PWM frequency*/
+    TCA0.SINGLE.PER = 250;			/* set PWM frequency*/
     
     TCA0.SINGLE.INTCTRL= TCA_SINGLE_OVF_bm ;
     
   // TCA0.SINGLE.CTRLESET=TCA_SINGLE_DIR_bm;
     TCA0.SINGLE.CMP1 = PERIOD_EXAMPLE_VALUE1*0.05;
-     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc/* set clock source (sys_clk/1) */
-                       |TCA_SINGLE_ENABLE_bm;		/* start timer */
+     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc;/* set clock source (sys_clk/1) */
+                       
 }
 
 void IO_init(void){
@@ -316,6 +335,7 @@ void IO_init(void){
     PORTA.OUTSET = PIN3_bm;//motor OFF
     
     PORTC.DIRSET = PIN6_bm;//step PWM
+    PORTC.OUTSET = PIN6_bm;//repouso
     
     PORTE.DIRSET = PIN0_bm;//seek_dir
     PORTE.OUTSET = PIN0_bm;//pos neg
@@ -331,7 +351,7 @@ void IO_init(void){
     PORTE.PIN1CTRL=PORT_INVEN_bm;
     
     PORTB.DIRSET= PIN5_bm; //Write gate
-    PORTB.OUTSET = PIN5_bm; //Modo escrita
+    PORTB.OUTSET = PIN5_bm; //Modo leitura
      
     PORTB.DIRSET= PIN4_bm;
 }
@@ -382,9 +402,15 @@ int main (void)
 
 
     IO_init();
+    PORTA.OUTCLR= PIN3_bm;//motor on;
+    PORTA.OUTCLR= PIN2_bm;//drive_on;
     
+    PWM_dataout_init();
     //TCA1.SINGLE.CMP2 = dutyCycle;
-    //USART1_init();
+    
+    USART1_init();
+    //PWM_stepper_init();
+    //move_head(SEEK_0,0);
     sei();
     
     while(1){
@@ -399,8 +425,7 @@ int main (void)
     sei();
     
     while(debug_var==0);
-    PORTA.OUTCLR= PIN3_bm;//motor on;
-    PORTA.OUTCLR= PIN2_bm;//drive_on;
+    
    // _delay_ms(500);
     move_head(SEEK_0,0);
     PORTB.OUTCLR=PIN5_bm;    
