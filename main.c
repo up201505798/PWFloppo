@@ -17,7 +17,7 @@
     OF FEES, IF ANY, THAT YOU HAVE PAID DIRECTLY TO MICROCHIP FOR THIS
     SOFTWARE.
 */
-#define F_CPU                           (24000000UL)         /* using default clock 4MHz*/
+#define F_CPU                           (32000000UL)         /* using default clock 4MHz*/
 #define USART1_BAUD_RATE(BAUD_RATE)     ((float)(64 * F_CPU / (16 * (float)BAUD_RATE)) + 0.5)
 #define PERIOD_EXAMPLE_VALUE			(0x8C4F)
 #define PERIOD_EXAMPLE_VALUE1			(0xA0)
@@ -44,7 +44,7 @@ volatile uint8_t seek_mode=0;
 volatile uint8_t seek_curr_pos=SEEK_INIT_VAL;
 volatile uint8_t seek_next_pos=0;
 
-
+volatile uint8_t curr_track=0;
 volatile uint8_t debug_var=0;
 //volatile uint8_t state=0;
  
@@ -53,11 +53,23 @@ volatile uint8_t buf1[BUF_BIG] __attribute__((aligned(64))); ;
 
 volatile uint8_t write_mode=0;
 
-#define WRITE_OFF 0
-#define DELETE_TRACK 1
-#define FIND_SECTOR 2
-#define SAVE_SECTOR 3
+#define OFF 0
+#define WAITING_BUFFER 1
+#define FILLING_BUFFER 2
+#define FIND_SECTOR_WRITE 3
+#define SAVE_SECTOR 4
+#define ERASE_DISK 5
+
+
 volatile uint8_t curr_sector=0;
+volatile uint8_t last_w_sector=0;
+
+
+#define END_OF_SECTOR 252
+#define BEGIN_OF_SECTOR 244
+
+
+#define DATA_STEP 13
 
 
 
@@ -67,30 +79,30 @@ void PWM_dataout_init(void);
 
 
 void CLK_Init(void){   
-    _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, CLKCTRL_FREQSEL_24M_gc);    
+    _PROTECTED_WRITE (CLKCTRL.OSCHFCTRLA, 0x0B<<2);    //32MHZ
     _PROTECTED_WRITE (CLKCTRL.XOSC32KCTRLA, CLKCTRL_ENABLE_bm);
     _PROTECTED_WRITE (CLKCTRL.MCLKCTRLA, (CLKCTRL_CLKSEL_OSCHF_gc | CLKCTRL_CLKOUT_bm));
 }
 
 ISR(USART1_RXC_vect){
     static uint8_t first=1;
-    if(first){
+    /*if(first){
         if(USART1.RXDATAL=='1'){
             
             USART1.CTRLB &= ~(USART_TXEN_bm) ;  
             first=0;
             return;
         }
-    }
+    }*/
     static uint16_t counter_rx=0;
     buf1[counter_rx]=USART1.RXDATAL;
     
-    if(++counter_rx==(BUF_BIG-2)){
+    if(++counter_rx==(BUF_BIG)){
         counter_rx=0;
         write_mode=DELETE_TRACK;
         PORTB.OUTCLR = PIN5_bm; //Modo escrita
         PORTE.OUTSET = PIN1_bm;
-        //TCA0.SINGLE.CTRLA |=TCA_SINGLE_ENABLE_bm;		/* start timer */
+        TCA0.SINGLE.CTRLA |=TCA_SINGLE_ENABLE_bm;		/* start timer */
         
     }
         
@@ -203,20 +215,43 @@ ISR (TCA0_OVF_vect) {
 
 ISR(PORTE_PORT_vect){
     
+#define OFF 0
+#define WAITING_BUFFER 1
+#define FILLING_BUFFER 2
+#define FIND_SECTOR_WRITE 3
+#define SAVE_SECTOR 4
+#define ERASE_DISK 5
+
     if(PORTE.INTFLAGS&PIN2_bm){ //INTERRUCAO INDEX
         
         PORTE.INTFLAGS|=(PIN2_bm);
-        if((PORTE.IN&PIN2_bm)){
-            if(write_mode==DELETE_TRACK){//comeco
-                static uint8_t erase_passes=0;
-                if(erase_passes)
-                    erase_passes--;
-                else{
-                    erase_passes=0;
-                    TCA0.SINGLE.PER = 250;
+        if(!(PORTE.IN&PIN2_bm)){//INICIO DE INDEX
+            if(write_mode==SAVE_SECTOR){
+                TCA0.SINGLE.CTRLA =0;//deligar timer
+                TCA0.SINGLE.CNT = 0;//reiniciar contador
+                move_head(SEEK_VALUE,++curr_track);//avancar uma posicao
+                
+                //falta a troca de densidade
+                
+                last_w_sector=0;
+                curr_sector=0;
+                return;
+            }
+            else if(write_mode==FIND_SECTOR_WRITE){//Pode comecar a escrever
+                if(last_w_sector==0){
                     write_mode=SAVE_SECTOR;
-                    TCA0.SINGLE.CTRLA |=  TCA_SINGLE_ENABLE_bm;	
+                    PORTB.OUTCLR = PIN5_bm;//modo de escrita
+                    return;
                 }
+                
+                return;
+            }     
+        }
+        if((PORTE.IN&PIN2_bm)){//FIM DO INDEX
+            if(write_mode==SAVE_SECTOR){//gravar primeiro setor  
+                TCA0.SINGLE.PER = 2;
+
+                TCA1.SINGLE.CMP2 = PERIOD_EXAMPLE_VALUE*0.95;
             }
             if(write_mode==WRITE_OFF){
                 PORTB.OUTSET = PIN5_bm; //Modo leitura
@@ -280,12 +315,6 @@ int move_head(uint8_t mode, uint8_t new_pos){
         return delta;
 }
                         
-                    
-                    
-                    
-                
-
-
 void PWM_stepper_init(void){
 	PORTMUX.TCAROUTEA |= PORTMUX_TCA10_bm;			/* set waveform output on PORT C */
 
@@ -303,8 +332,6 @@ void PWM_stepper_init(void){
 }
 
 void PWM_dataout_init(void){
-    buf1[BUF_BIG-1]=185;
-    buf1[BUF_BIG-2]=185;
 	PORTMUX.TCAROUTEA |= PORTMUX_TCA02_bm;			/* set waveform output on PORT E */
 
     TCA0.SINGLE.CTRLB = TCA_SINGLE_CMP1EN_bm                    /* enable compare channel 1 */
@@ -315,13 +342,13 @@ void PWM_dataout_init(void){
     
   // TCA0.SINGLE.CTRLESET=TCA_SINGLE_LUPD_bp;
     
-    TCA0.SINGLE.PER = 250;			/* set PWM frequency*/
+    //TCA0.SINGLE.PER = 250;			/* set PWM frequency*/
     
     TCA0.SINGLE.INTCTRL= TCA_SINGLE_OVF_bm ;
     
   // TCA0.SINGLE.CTRLESET=TCA_SINGLE_DIR_bm;
-    TCA0.SINGLE.CMP1 = PERIOD_EXAMPLE_VALUE1*0.05;
-     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc;/* set clock source (sys_clk/1) */
+    TCA0.SINGLE.CMP1 = DATA_STEP;
+    //TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV1_gc;/* set clock source (sys_clk/1) */
                        
 }
 
@@ -354,6 +381,10 @@ void IO_init(void){
     PORTB.OUTSET = PIN5_bm; //Modo leitura
      
     PORTB.DIRSET= PIN4_bm;
+    
+    
+    PORTB.DIRCLR = PIN2_bm; /* leitura dados disquete */
+    
 }
  void USART1_init(void){
     PORTC.DIRSET = PIN0_bm;                             /* set pin 0 of PORT C (TXd) as output*/
@@ -390,6 +421,36 @@ void USART1_sendString(const char* string)
 
 
 
+
+void EVENT_SYSTEM_init (void)
+{
+    /* Set Port 1 Pin 2 (PB2) as input event*/
+    EVSYS.CHANNEL0 = 0x48+2;
+    /* Connect user to event channel 0 */
+    EVSYS.USERTCB2CAPT = 1;//Channel 0
+}
+
+void TCB0_init (void)
+{
+    /* Configure TCB in Periodic Timeout mode */
+    TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
+    
+    /* Enable Capture or Timeout interrupt */
+    TCB0.INTCTRL = TCB_CAPT_bm;
+    
+    /* Enable Event Input and Event Edge*/
+    TCB0.EVCTRL = TCB_CAPTEI_bm | TCB_EDGE_bm;
+    
+    /* Enable TCB and set CLK_PER divider to 1 (No Prescaling) */
+    TCB0.CTRLA = TCB_CLKSEL_DIV1_gc;// | TCB_ENABLE_bm;
+}
+
+ISR(TCB0_INT_vect)
+{
+    TCB0.INTFLAGS = TCB_CAPT_bm; /* Clear the interrupt flag */
+    
+    //PORTB.OUTTGL = PIN5_bm; /* Toggle PB5 GPIO */
+}
 
 int main (void)
 {

@@ -26,11 +26,13 @@ public class Serial_arduino {
 		InputStream in = comPort.getInputStream();
 		OutputStream out = comPort.getOutputStream();
 		PrintWriter texto = new PrintWriter("filename.txt");
+		int pulses_sent=0;
+		int samples_read=0;
 		try
 		{
 
 
-			WavFile wavFile = WavFile.openWavFile(new File("C:\\Users\\PC\\Music\\seno.wav"));
+			WavFile wavFile = WavFile.openWavFile(new File("C:\\Users\\PC\\Music\\teste.wav"));
 			wavFile.display();
 			int numChannels = wavFile.getNumChannels();
 			if(numChannels >1) {
@@ -50,7 +52,7 @@ public class Serial_arduino {
 					}
 				}
 
-					for(int i=0;i<(15360-2);i++) {
+					for(int i=0;i<(15360);i++) {
 
 						texto.println(i);
 						System.out.println(i);
@@ -59,6 +61,7 @@ public class Serial_arduino {
 								if((wavFile.readFrames(buffer,1))==-1)//nao leu uma amostra
 									fim=true;
 								else {
+									samples_read++;
 									buffer[0]=(int)Math.round(((float)buffer[0])/((float) 64));//ajustar a 10 bits
 									texto.print((int)buffer[0] +"--> ");
 								}
@@ -66,24 +69,24 @@ public class Serial_arduino {
 							if(buffered_delta==false){
 								delta=buffer[0]-last_read;
 								last_read=buffer[0];
-								if(Math.abs(delta)>126) {
+								if(Math.abs(delta)>127) {
 									if(delta>0) {
-										extra_delta+=delta-126;
-										delta=126;
+										extra_delta+=delta-127;
+										delta=127;
 									}
 									else {
-										extra_delta+=delta+126;
-										delta=-126;
+										extra_delta+=delta+127;
+										delta=-127;
 									}
 								}
 								else if(extra_delta!=0) {
 									if(extra_delta>0)
-										while(delta<126 && extra_delta>0) {
+										while(delta<127 && extra_delta>0) {
 											delta++;
 											extra_delta--;
 										}
 									if(extra_delta<0)
-										while(delta>-126 && extra_delta<0) {
+										while(delta>-127 && extra_delta<0) {
 											delta--;
 											extra_delta++;
 										}
@@ -96,50 +99,41 @@ public class Serial_arduino {
 							delta=0;
 
 
-						int envios=0;
-						if(Math.abs(delta)>63)
-							envios=3;
-						else
-							envios=2;
-						if((15360-2)-i<envios) {//nao há espaco suficiente
+						
+						if(i==15359) {//nao há espaco suficiente
 							buffered_delta=true;
-							out.write((byte) (180));//sinal de fim
-							texto.print((int) (180) + "  ");
-							texto.println((byte) (180) + " / ");
+							out.write((byte) (252));//sinal de fim
+							pulses_sent+=180;
+							texto.print((int) (252) + "  ");
+							texto.println((byte) (252) + " / ");
 							continue;
 						}
 						else {   
 							texto.print(delta+ "-->");
 							if(delta>0) {
 								out.write((byte) (75));//positivo
+								pulses_sent+=75;
 								texto.print( (75) + " ");
 							}
 							else {
 								out.write((byte) (84));//negativo
+								pulses_sent+=84;
 								texto.print( (84)+ " ");
 							}
-							if(envios==2) {
+							
 								out.write((byte) ((Math.abs(delta))+96));//entre 0 e 63
+								pulses_sent+=Math.abs(delta)+96;
 								texto.print(((int)(Math.abs(delta)+96))+"  ");
 								texto.println(((byte)(Math.abs(delta)+96))+" / ");
 								i++;
-							}
-							if(envios==3) {
-								out.write((byte) (63+96));//64
-								texto.print((int) (63+96)+ "  ");
-								texto.print((byte) (63+96)+ " / ");
-								
-								i++;
-								out.write((byte) ((Math.abs(delta))+(-63+96)));//+ resto
-								texto.print(((int) Math.abs(delta) + (-63+96))+ "  ");
-								texto.println((byte) ((Math.abs(delta))+(-63+96))+ " / ");
-								i++;
-							}
+							
 
 
 						}
 					}
 					System.out.println("fim ");
+					System.out.println(((double)pulses_sent)/32000000.0);
+					System.out.println(samples_read);
 					texto.flush();
 				}
 
@@ -155,7 +149,9 @@ public class Serial_arduino {
 
 		out.close();
 		comPort.closePort();
+		
 		System.out.println("fim ");
+		
 		texto.flush();
 	}
 }
